@@ -1,4 +1,4 @@
-# ----------------------------------------------------------------------------
+                     # ----------------------------------------------------------------------------
 #   Basic Configuration
 # ----------------------------------------------------------------------------
 CMAKE_MINIMUM_REQUIRED(VERSION 2.6)
@@ -49,11 +49,7 @@ include_directories (${OGRE_INCLUDE_DIRS})
 # ----------------------------------------------------------------------------
 
 add_executable (aruco_test_ogre aruco_test_ogre.cpp)
-add_executable (aruco_test_board_ogre aruco_test_board_ogre.cpp)
-add_executable (aruco_test_board_ogre_mask aruco_test_board_ogre_mask.cpp)
 target_link_libraries(aruco_test_ogre ${REQUIRED_LIBRARIES})
-target_link_libraries(aruco_test_board_ogre ${REQUIRED_LIBRARIES})
-target_link_libraries(aruco_test_board_ogre_mask ${REQUIRED_LIBRARIES})
 
 configure_file(plugins.cfg plugins.cfg COPYONLY)
 configure_file(ogre.cfg ogre.cfg COPYONLY)
