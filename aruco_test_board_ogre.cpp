@@ -84,7 +84,7 @@ void drawOptFlowMap (const cv::Mat& flow, cv::Mat& cflowmap, int step, const cv:
         }
 }
 
-void decideOrientation(const cv::Mat& flow, cv::Mat& cflow)
+int decideOrientation(const cv::Mat& flow, cv::Mat& cflow)
 {
     int fx = flow.at<Point2f>(0,0).x;
     int fy = flow.at<Point2f>(0,0).y;
@@ -102,7 +102,7 @@ void decideOrientation(const cv::Mat& flow, cv::Mat& cflow)
     fy = fy / flow.rows;
 
 
-    if(fx > 0) throw Exception();
+	return fx;
 
 }
 
@@ -113,6 +113,12 @@ int main()
     Size size(160, 120);
     Mat GetImg;
     Mat prvs, next; //current frame
+
+	int curCounter = 0;
+	int prevCounter = 0;
+	int curValue = 0;
+	int flags = 0;
+	int temp = 0;
 
     VideoCapture cap(0);   //0 is the id of video device.0 if you have only one camera
     if(!(cap.read(GetImg))) //get one frame form video
@@ -145,7 +151,32 @@ int main()
         imshow("prvs", prvs);
         imshow("next", next);
         decideOrientation(flow, cflow);
-        waitKey(30);
+		curCounter += curValue = decideOrientation(flow, cflow);
+		waitKey(30);
+
+
+		if (curValue == 0){
+			flags++;
+		}
+
+		temp = curCounter - prevCounter;
+		if(abs(temp) > 100){
+			if (flags >= 5){
+				if (temp < 0){
+					printf("VLEVO");
+					flags = 0;
+					prevCounter = curCounter;
+				} else {
+					printf("VPRAVO");
+					flags = 0;
+					prevCounter = curCounter;
+				}
+			}
+		}
+		else {
+			flags = 0;
+		}
+		printf("cur = %i, prev = %i, curVal = %i, flags = %i  \n", curCounter, prevCounter, curValue, flags);
         prvs = next.clone();
     }
 }
