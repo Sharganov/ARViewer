@@ -29,6 +29,7 @@ or implied, of Rafael Muñoz Salinas.
 #include <iostream>
 
 #include "Ogre.h"
+
 #include <OIS/OIS.h>
 
 #include <aruco/aruco.h>  
@@ -62,8 +63,18 @@ float TheMarkerSize=1;
 aruco::MarkerDetector TheMarkerDetector;
 std::vector<aruco::Marker> TheMarkers;
 
-
 cv::Mat camMatrix, distCoeffs;
+const char* keys  =
+        "{d        |       | dictionary: DICT_4X4_50=0, DICT_4X4_100=1, DICT_4X4_250=2,"
+        "DICT_4X4_1000=3, DICT_5X5_50=4, DICT_5X5_100=5, DICT_5X5_250=6, DICT_5X5_1000=7, "
+        "DICT_6X6_50=8, DICT_6X6_100=9, DICT_6X6_250=10, DICT_6X6_1000=11, DICT_7X7_50=12,"
+        "DICT_7X7_100=13, DICT_7X7_250=14, DICT_7X7_1000=15, DICT_ARUCO_ORIGINAL = 16}"
+        "{v        |       | Input from video file, if ommited, input comes from camera }"
+        "{ci       | 0     | Camera id if input doesnt come from video (-v) }"
+        "{c        |       | Camera intrinsic parameters. Needed for camera pose }"
+        "{l        | 0.1   | Marker side lenght (in meters). Needed for correct scale in camera pose }"
+        "{dp       |       | File of marker detector parameters }"
+        "{r        |       | show rejected candidates too }";
 
 
 // opencv aruco
@@ -73,7 +84,7 @@ int initOgreAR(aruco::CameraParameters camParams, unsigned char* buffer, std::st
 bool readParameters(int argc, char** argv);
 
 static bool readCameraParameters(string filename, cv::Mat &camMatrix, cv::Mat &distCoeffs) {
-    cv::FileStorage fs(filename, cv::FileStorage::READ);
+    cv::FileStorage fs("camera.yml", cv::FileStorage::READ);
     if(!fs.isOpened())
         return false;
     fs["camera_matrix"] >> camMatrix;
@@ -82,13 +93,13 @@ static bool readCameraParameters(string filename, cv::Mat &camMatrix, cv::Mat &d
 }
 
 
-void OgreGetPoseParameters(cv::Mat Tvec, cv::Mat Rvec, double position[3], double orientation[4]) throw(cv::Exception) {
+void OgreGetPoseParameters(cv::Vec3d Tvec, cv::Vec3d Rvec, double position[3], double orientation[4]) throw(cv::Exception) {
 
 
     // calculate position vector
-    position[0] = -Tvec.ptr< float >(0)[0];
-    position[1] = -Tvec.ptr< float >(0)[1];
-    position[2] = +Tvec.ptr< float >(0)[2];
+    position[0] = -Tvec[0];
+    position[1] = -Tvec[1];
+    position[2] = +Tvec[2];
 
     // now calculare orientation quaternion
     cv::Mat Rot(3, 3, CV_32FC1);
@@ -97,13 +108,13 @@ void OgreGetPoseParameters(cv::Mat Tvec, cv::Mat Rvec, double position[3], doubl
     // calculate axes for quaternion
     double stAxes[3][3];
     // x axis
-    stAxes[0][0] = -Rot.at< float >(0, 0);
-    stAxes[0][1] = -Rot.at< float >(1, 0);
-    stAxes[0][2] = +Rot.at< float >(2, 0);
+    stAxes[0][0] = -Rot.at< double >(0, 0);
+    stAxes[0][1] = -Rot.at< double >(1, 0);
+    stAxes[0][2] = +Rot.at< double >(2, 0);
     // y axis
-    stAxes[1][0] = -Rot.at< float >(0, 1);
-    stAxes[1][1] = -Rot.at< float >(1, 1);
-    stAxes[1][2] = +Rot.at< float >(2, 1);
+    stAxes[1][0] = -Rot.at< double >(0, 1);
+    stAxes[1][1] = -Rot.at< double >(1, 1);
+    stAxes[1][2] = +Rot.at< double >(2, 1);
     // for z axis, we use cross product
     stAxes[2][0] = stAxes[0][1] * stAxes[1][2] - stAxes[0][2] * stAxes[1][1];
     stAxes[2][1] = -stAxes[0][0] * stAxes[1][2] + stAxes[0][2] * stAxes[1][0];
@@ -157,27 +168,6 @@ void OgreGetPoseParameters(cv::Mat Tvec, cv::Mat Rvec, double position[3], doubl
     }
 }
 
-
-void decideOrientation(const cv::Mat& flow, cv::Mat& cflow)
-{
-    int fx = flow.at<cv::Point2f>(0,0).x;
-    int fy = flow.at<cv::Point2f>(0,0).y;
-
-    cv::Point2f fxy = (flow.at<cv::Point2f>(0,0));
-
-    for(int y =0; y < flow.rows; y++)
-    {
-        for(int x=0; x <  flow.cols; x++)
-        {
-            fx += flow.at<cv::Point2f>(y,x).x;
-            fy += flow.at<cv::Point2f>(y,x).y;
-        }
-    }
-    fx = fx / flow.cols;
-    fy = fy / flow.rows;
-
-}
-
 void usage()
 {
     cout<<" This program test Ogre version of ArUco (single marker version) \n\n";
@@ -191,11 +181,14 @@ void usage()
 int main(int argc, char** argv)
 {
 
+    cv::CommandLineParser parser(argc, argv, keys);
 
+    dictionary = cv::aruco::getPredefinedDictionary(cv::aruco::PREDEFINED_DICTIONARY_NAME(0));
 
-    cv::Mat prevImg;
-    dictionary =
-            cv::aruco::getPredefinedDictionary(cv::aruco::PREDEFINED_DICTIONARY_NAME(8));
+    bool readOk = readCameraParameters(parser.get<string>("c"), camMatrix, distCoeffs);
+
+    if(!readOk) throw cv::Exception();
+
     /// READ PARAMETERS
     if(!readParameters(argc, argv))
         return false;
@@ -203,17 +196,19 @@ int main(int argc, char** argv)
     /// CREATE UNDISTORTED CAMERA PARAMS
     CameraParamsUnd=CameraParams;
     CameraParamsUnd.Distorsion=cv::Mat::zeros(4,1,CV_32F);
+    for(int i =0; i<9; i++) cout<<(float) CameraParams.CameraMatrix.data[i] << endl;
 
     /// CAPTURE FIRST FRAME
     TheVideoCapturer.grab();
     TheVideoCapturer.retrieve ( newImg );
     cv::undistort(newImg,TheInputImageUnd,CameraParams.CameraMatrix,CameraParams.Distorsion);
 
-    bool readOk = readCameraParameters(parser.get<string>("c"), camMatrix, distCoeffs);
+
 
     /// INIT OGRE
-    initOgreAR(CameraParamsUnd, TheInputImageUnd.ptr<uchar>(0));
+    //initOgreAR(CameraParamsUnd, TheInputImageUnd.ptr<uchar>(0));
 
+    initOgreAR(CameraParamsUnd, newImg.ptr<uchar>(0));
 
 
     while (TheVideoCapturer.grab())
@@ -221,7 +216,7 @@ int main(int argc, char** argv)
 
         /// READ AND UNDISTORT IMAGE
         TheVideoCapturer.retrieve ( newImg );
-        cv::undistort(newImg,TheInputImageUnd,CameraParams.CameraMatrix,CameraParams.Distorsion);
+        //cv::undistort(newImg,TheInputImageUnd,CameraParams.CameraMatrix,CameraParams.Distorsion);
 
 
         vector< int > ids;
@@ -229,32 +224,45 @@ int main(int argc, char** argv)
 
         cv::aruco::detectMarkers(newImg, dictionary, corners, ids);
 
-        vector< cv::Mat > rvecs, tvecs;
+
+        vector< cv::Vec3d> rvecs, tvecs;
+
+        if(ids.size() > 0)
+        {
+
+            cv::aruco::estimatePoseSingleMarkers(corners, 0.057, camMatrix, distCoeffs, rvecs, tvecs);
+
+        }
+
+        double position[3], orientation[4];
+
+        /// UPDATE SCENE
+        int i=0;
+
+        for(i=0; i < ids.size(); i++)
+        {
 
 
-        //change marker size in meters
-        cv::aruco::estimatePoseSingleMarkers(corners, 0.057, CameraParams.CameraMatrix, CameraParams.Distorsion, rvecs, tvecs);
+            OgreGetPoseParameters(tvecs[i], rvecs[i], position, orientation);
+
+            ogreNode[i]->setPosition( position[0], position[1], position[2] );
+            ogreNode[i]->setOrientation( orientation[0], orientation[1], orientation[2], orientation[3]  );
+            ogreNode[i]->setVisible(true);
+
+        }
 
 
-        //throw cv::Exception();
-        /// DETECT MARKERS
-        TheMarkerDetector.detect(TheInputImageUnd, TheMarkers, CameraParamsUnd, 0.057);
+        if(ids.size() > 0) {
+            cv::aruco::drawDetectedMarkers(newImg, corners, ids);
+
+            for(unsigned int i = 0; i < ids.size(); i++)
+                cv::aruco::drawAxis(newImg, camMatrix, distCoeffs, rvecs[i], tvecs[i],
+                                    0.057 * 0.5f);
+        }
 
 
         /// UPDATE BACKGROUND IMAGE
         mTexture->getBuffer()->blitFromMemory(mPixelBox);
-
-        /// UPDATE SCENE
-        int i;
-        double position[3], orientation[4];
-        // show nodes for detected markers
-        for(i=0; i<TheMarkers.size() && i<MAX_MARKERS; i++) {
-
-            TheMarkers[i].OgreGetPoseParameters(position, orientation);
-            ogreNode[i]->setPosition( position[0], position[1], position[2]  );
-            ogreNode[i]->setOrientation( orientation[0], orientation[1], orientation[2], orientation[3]  );
-            ogreNode[i]->setVisible(true);
-        }
 
         // hide rest of nodes
         for( ; i<MAX_MARKERS; i++) ogreNode[i]->setVisible(false);
@@ -295,7 +303,7 @@ bool readParameters(int argc, char** argv)
         return false;
     }
     // read input video
-     TheVideoCapturer.open(0);
+    TheVideoCapturer.open(1);
 
     if (!TheVideoCapturer.isOpened())
     {
@@ -318,9 +326,6 @@ bool readParameters(int argc, char** argv)
 }
 
 
-/**
-  *
-  */
 int initOgreAR(aruco::CameraParameters camParams, unsigned char* buffer, std::string resourcePath)
 {
 
@@ -346,6 +351,7 @@ int initOgreAR(aruco::CameraParameters camParams, unsigned char* buffer, std::st
             pMatrix[4], pMatrix[5], pMatrix[6] , pMatrix[7],
             pMatrix[8], pMatrix[9], pMatrix[10], pMatrix[11],
             pMatrix[12], pMatrix[13], pMatrix[14], pMatrix[15]);
+    for(int i=0; i< 16; i++) cout << pMatrix[i] << endl;
     camera->setCustomProjectionMatrix(true, PM);
     camera->setCustomViewMatrix(true, Ogre::Matrix4::IDENTITY);
     window->addViewport(camera);
@@ -428,6 +434,7 @@ int initOgreAR(aruco::CameraParameters camParams, unsigned char* buffer, std::st
 
     return 1;
 }
+
 
 
 
